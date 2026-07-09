@@ -24,7 +24,7 @@ func getEnv(key, fallback string) string {
 }
 
 func main() {
-	listenPort := getEnv("PORT", "8080") // Membaca port dinamis dari Railway
+	listenPort := getEnv("PORT", "8080")
 	log.Println("================================================================")
 	log.Printf("GOLANG TURBO TUNNEL ENGINE ACTIVE ON PORT %s\n", listenPort)
 	log.Println("================================================================")
@@ -40,25 +40,25 @@ func main() {
 		if err != nil {
 			continue
 		}
-		go handle(c) // Multi-threading murni lewat Goroutine
+		go handle(c)
 	}
 }
 
 func handle(c net.Conn) {
 	defer c.Close()
 	
-	// 🔥 KESABARAN EXTRA: Nunggu tumpukan payload kotor lu ngumpul selama 2 detik (Anti-502)
+	// Mode Sabar 2 detik untuk membaca full tumpukan request payload kotor lu
 	c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 65536)
 	n, err := c.Read(buf)
 	if err != nil || n == 0 {
 		return
 	}
-	c.SetReadDeadline(time.Time{}) // Reset timeout
+	c.SetReadDeadline(time.Time{})
 
 	rawPayload := buf[:n]
 
-	// 🛡️ JALUR 1: PINTER MULTIPLEXING - Jika traffic adalah SSL/TLS murni (Stunnel)
+	// 🛡️ MULTIPLEXING JALUR SSL/TLS MURNI (Stunnel)
 	if rawPayload[0] == TLS_HANDSHAKE_BYTE {
 		sslTargetHost := getEnv("SSL_TARGET_HOST", "127.0.0.1")
 		sslTargetPort := getEnv("SSL_TARGET_PORT", "2443")
@@ -69,15 +69,13 @@ func handle(c net.Conn) {
 		}
 		defer targetConn.Close()
 
-		// Set tuning buffer kilat untuk jalur SSL murni
 		if tcpTarget, ok := targetConn.(*net.TCPConn); ok { tcpTarget.SetNoDelay(true) }
 		if tcpClient, ok := c.(*net.TCPConn); ok { tcpClient.SetNoDelay(true) }
 
 		targetConn.Write(rawPayload)
 		
-		// Jalur pipa dua arah instan untuk TLS murni
-		b1 := make([]byte, 131072)
-		b2 := make([]byte, 131072)
+		b1 := make([]byte, 65536)
+		b2 := make([]byte, 65536)
 		go func() {
 			for {
 				rn, err := c.Read(b1)
@@ -93,7 +91,7 @@ func handle(c net.Conn) {
 		return
 	}
 
-	// 🌐 JALUR 2: WEBSOCKET HANDSHAKE (Logika Contains Sabar Anti-Gagal)
+	// 🌐 JALUR WEBSOCKET HANDSHAKE
 	req := string(rawPayload)
 	wsKey := ""
 	
@@ -115,7 +113,6 @@ func handle(c net.Conn) {
 	h.Write([]byte(wsKey + WS_MAGIC))
 	accept := base64.StdEncoding.EncodeToString(h.Sum(nil))
 
-	// Balas jabat tangan 101 murni
 	response := "HTTP/1.1 101 Switching Protocols\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
@@ -131,31 +128,28 @@ func handle(c net.Conn) {
 	}
 	defer ssh.Close()
 
-	// Eksekusi Pipa Pengunci Jaringan Turbo Monster Buffer
-	go ioCopy(ssh, c, true) // Jalur HP -> SSH (Filter sampah payload)
-	ioCopy(c, ssh, false)   // Jalur SSH -> HP (Injeksi Heartbeat Perangko Super Rapat)
+	go ioCopy(ssh, c, true) // Jalur HP -> SSH
+	ioCopy(c, ssh, false)   // Jalur SSH -> HP (Dengan Lem Perangko Aman)
 }
 
 func ioCopy(dst, src net.Conn, filter bool) {
-	// 🚀 MONSTER BUFFER BLOCK: Naikkan ukuran buffer ke 128KB biar download gak delay
-	b := make([]byte, 131072)
+	b := make([]byte, 65536)
 	first := true
 	
 	if tcpDst, ok := dst.(*net.TCPConn); ok { tcpDst.SetNoDelay(true) }
 	if tcpSrc, ok := src.(*net.TCPConn); ok { tcpSrc.SetNoDelay(true) }
 
 	for {
-		// ⚓ LEM PERANGKO ULTRA AGRESIF (Khusus jalur Downlink: SSH -> HP)
 		if !filter {
-			// Kurangi ke 4 detik biar sebelum Cloudflare kepikiran mutus, Go udah nembak duluan
-			src.SetReadDeadline(time.Now().Add(4 * time.Second))
+			// 🔥 Amankan jeda baca ke 15 detik agar tidak dianggap menyerang oleh Cloudflare
+			src.SetReadDeadline(time.Now().Add(15 * time.Second))
 		}
 
 		n, err := src.Read(b)
 		
 		if err != nil {
-			// Mengatasi timeout bengong sepi data, suntik frame ping biner \x89\x00
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() && !filter {
+				// Tembak ping sewajarnya tiap 15 detik pas sepi biar jalur tetep hidup
 				dst.Write([]byte{0x89, 0x00})
 				continue
 			}
@@ -166,7 +160,6 @@ func ioCopy(dst, src net.Conn, filter bool) {
 			continue
 		}
 
-		// 🎯 ENHANCED PAYLOAD MATCHER (Jalur Uplink: HP -> SSH)
 		if filter && first {
 			idx := bytes.Index(b[:n], []byte("SSH-"))
 			if idx != -1 { 
@@ -181,7 +174,7 @@ func ioCopy(dst, src net.Conn, filter bool) {
 		}
 		
 		if !filter {
-			src.SetReadDeadline(time.Time{}) // Reset deadline pas data asli sukses ngalir
+			src.SetReadDeadline(time.Time{})
 		}
 	}
 }
